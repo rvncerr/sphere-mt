@@ -1,40 +1,49 @@
-#include <stdexcept>
+#ifndef ALLOCATOR
+#define ALLOCATOR
 #include <string>
 
-enum class AllocErrorType {
-    InvalidFree,
-    NoMemory,
-};
+// Forward declaration. Do not include real class definition
+// to avoid expensive macros calculations and increase compile speed
+class Pointer;
 
-class AllocError: std::runtime_error {
-private:
-    AllocErrorType type;
-
-public:
-    AllocError(AllocErrorType _type, std::string message):
-            runtime_error(message),
-            type(_type)
-    {}
-
-    AllocErrorType getType() const { return type; }
-};
-
-class Allocator;
-
-class Pointer {
-public:
-    void *get() const { return 0; } 
-};
-
+/**
+ * Wraps given memory area and provides defagmentation allocator interface on
+ * the top of it.
+ *
+ *
+ */
 class Allocator {
 public:
-    Allocator(void *base, size_t size) {}
-    
-    Pointer alloc(size_t N) { return Pointer(); }
-    void realloc(Pointer &p, size_t N) {}
-    void free(Pointer &p) {}
+    Allocator(void* base, size_t size) {}
 
+    /**
+     * TODO: semantics
+     * @param N size_t
+     */
+    Pointer alloc(size_t N);
+
+    /**
+     * TODO: semantics
+     * @param p Pointer
+     * @param N size_t
+     */
+    void realloc(Pointer& p, size_t N) {}
+
+    /**
+     * TODO: semantics
+     * @param p Pointer
+     */
+    void free(Pointer& p) {}
+
+    /**
+     * TODO: semantics
+     */
     void defrag() {}
-    std::string dump() { return ""; }
+
+    /**
+     * TODO: semantics
+     */
+    std::string dump() const { return ""; }
 };
 
+#endif // ALLOCATOR
