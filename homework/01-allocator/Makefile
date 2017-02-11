@@ -1,6 +1,6 @@
 TEST_FILES = ../thirdparty/gtest/gtest-all.cc ../thirdparty/gtest/gtest_main.cc
-SRC = allocator.cpp allocator_test.cpp
-HDR = allocator.h
+SRC = allocator.cpp allocator_error.cpp allocator_pointer.cpp allocator_test.cpp
+HDR = allocator.h allocator_error.h allocator_pointer.h
 
 
 all: tests.done
