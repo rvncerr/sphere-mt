@@ -1,11 +1,10 @@
 #ifndef __ITERATOR_H
 #define __ITERATOR_H
-
-// Forward declaration
-template <class K, class V> class Node;
+#include <cassert>
+#include "node.h"
 
 /**
- * Skiplist iterator
+ * Skiplist const iterator
  */
 template<class Key, class Value>
 class Iterator {
@@ -16,19 +15,46 @@ public:
   Iterator(Node<Key,Value> *p) : pCurrent(p) {}
   virtual ~Iterator() {}
 
-  virtual Key& key() = 0;
-  virtual Value& value() = 0;
+  virtual const Key& key() const {
+    assert(pCurrent != nullptr);
+    return pCurrent->key();
+  };
 
-  virtual Iterator& operator=(const Iterator &) = 0;
+  virtual const Value& value() const {
+    assert(pCurrent != nullptr);
+    return pCurrent->value();
+  };
 
-  virtual bool operator==(const Iterator &) = 0;
-  virtual bool operator!=(const Iterator &) = 0;
+  virtual const Value& operator*() {
+    assert(pCurrent != nullptr);
+    return pCurrent->value();
+  };
 
-  virtual Iterator& operator++() = 0;
-  virtual Iterator& operator++(int) = 0;
+  virtual const Value& operator->() {
+    assert(pCurrent != nullptr);
+    return pCurrent->value();
+  };
 
-  virtual Value& operator*() = 0;
-  virtual Value* operator->() = 0;
+  virtual bool operator==(const Iterator &) const {
+    return false;
+  };
+
+  virtual bool operator!=(const Iterator &) const {
+    return false;
+  };
+
+
+  virtual Iterator& operator=(const Iterator &) {
+    return *this;
+  };
+
+  virtual Iterator& operator++() {
+    return *this;
+  };
+
+  virtual Iterator& operator++(int) {
+    return *this;
+  };
 };
 
 #endif // __ITERATOR_H
