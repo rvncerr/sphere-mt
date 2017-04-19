@@ -1,8 +1,11 @@
 #ifndef COROUTINE_ENGINE_H
 #define COROUTINE_ENGINE_H
 
+#include <cstdint>
+#include <iostream>
 #include <map>
 #include <setjmp.h>
+#include <tuple>
 
 namespace Coroutine {
 
@@ -16,25 +19,31 @@ private:
      * A single coroutine instance which could be scheduled for execution
      * should be allocated on heap
      */
-    typedef struct {
-        // Begin of routine stack
-        char* Low;
+    struct context;
+    typedef struct context {
+        // coroutine stack start address
+        char* Low = nullptr;
 
-        // End of routine stack
-        char* High;
+        // coroutine stack end address
+        char* Hight = nullptr;
 
-        // routine stack copy
-        char* StackBuffer;
-        size_t BufferSize;
+        // coroutine stack copy buffer
+        std::tuple<char*, uint32_t> Stack = std::make_tuple(nullptr, 0);
 
-        // Saved routine context
+        // Saved coroutine context (registers)
         jmp_buf Environment;
 
-        // routine that start this one
-        struct routine* caller;
+        // Coroutine that has started this one. Once current routine is done, control must
+        // be passed back to caller
+        struct context* caller = nullptr;
 
-        // routine called by this one
-        struct routine* callee;
+        // Coroutine got control from the current one. Whenever current routine
+        // continues self exectution it must transfers control to callee if any
+        struct context* callee = nullptr;
+
+        // To include routine in the different lists, such as "alive", "blocked", e.t.c
+        struct context* prev = nullptr;
+        struct context* next = nullptr;
     } context;
 
     /**
@@ -42,34 +51,24 @@ private:
      */
     char* StackBottom;
 
-    /**
+    /**const int&
      * Current coroutine
      */
     context* cur_routine;
 
     /**
-     * Main coroutine
+     * List of routines ready to be scheduled. Note that suspended routine ends up here as well
      */
-    context* main_routine;
-
-    /**
-     * Sequence to enumerate coroutines
-     */
-    int context_seq;
-
-    /**
-     * All alive routines keyed by id
-     */
-    std::map<int, context*> alive;
+    context* alive;
 
 protected:
     /**
-     * Save state (stack & env) of the current coroutine in the given context
+     * Save stack of the current coroutine in the given context
      */
     void Store(context& ctx);
 
     /**
-     * Restore state (stack &env) in the c++ runtime from the given context
+     * Restore stack of the given context and pass control to coroutinne
      */
     void Restore(context& ctx);
 
@@ -80,49 +79,18 @@ protected:
 
 public:
     Engine()
-        : StackBottom(0) {}
+        : StackBottom(0)
+        , cur_routine(nullptr)
+        , alive(nullptr) {}
     Engine(Engine&&) = delete;
     Engine(const Engine&) = delete;
 
     /**
-     * Entry point into the engine. Prepare all internal mechanics and starts given function which is
-     * considered as main.
-     *
-     * Once control returns back to caller of start all coroutines are done execution
-     *
-     * @param arguments to be passed to the main coroutine
-     * @return result of coroutine execution
-     */
-    template <typename R, typename... Ta, typename... Tv>
-    R start(R (*main)(Ta...), Tv... args) {
-        // To acquire stack begin, create variable on stack and remember its address. Just before it, store pointer
-        // to the Engine
-        char StackStartsHere;
-        this->StackBottom = &StackStartsHere;
-
-        // Start routine execution
-        R result = main(std::forward<Tv>(args)...);
-
-        // Shutdown runtime
-        this->StackBottom = 0;
-        return result;
-    }
-
-    /**
-     * Register new coroutine. It won't receive control until scheduled explicitely or implicitely. In case of some
-     * errors function returns -1
-     */
-    template <typename... Ta, typename... Tv>
-    int run(void (*main)(Ta...), Tv... args) {
-        return -1;
-    }
-
-    /**
-     * Gives up current routine execution and let engine to schedule other routine. It is not defined when
+     * Gives up current routine execution and let engine to schedule other one. It is not defined when
      * routine will get execution back, for example if there are no other coroutines then execution could
-     * be trasferred back immediately or yeiled turns to be noop.
+     * be trasferred back immediately (yieled turns to be noop).
      *
-     * Also there are no guarantee what routine will get execution, it could be caller of the current one or
+     * Also there are no guarantee what coroutine will get execution, it could be caller of the current one or
      * any other which is ready to run
      */
     void yield();
@@ -134,7 +102,108 @@ public:
      * If routine to pass execution to is not specified runtime will try to transfer execution back to caller
      * of the current routine, if there is no caller then this method has same semantics as yield
      */
-    void sched(int routine);
+    void sched(void* routine);
+
+    /**
+     * Entry point into the engine. Prepare all internal mechanics and starts given function which is
+     * considered as main.
+     *
+     * Once control returns back to caller of start all coroutines are done execution, in other words,
+     * this function doesn't return control until all coroutines are done.
+     *
+     * @param pointer to the main coroutine
+     * @param arguments to be passed to the main coroutine
+     */
+    template <typename... Ta>
+    void start(void (*main)(Ta...), Ta&&... args) {
+        // To acquire stack begin, create variable on stack and remember its address
+        char StackStartsHere;
+        this->StackBottom = &StackStartsHere;
+
+        // Start routine execution
+        void* pc = run(main, std::forward<Ta>(args)...);
+        if (pc != nullptr) {
+            sched(pc);
+        }
+
+        // Shutdown runtime
+        this->StackBottom = 0;
+    }
+
+    /**
+     * Register new coroutine. It won't receive control until scheduled explicitely or implicitely. In case of some
+     * errors function returns -1
+     */
+    template <typename... Ta>
+    void* run(void (*func)(Ta...), Ta&&... args) {
+        if (this->StackBottom == 0) {
+            // Engine wasn't initialized yet, BAD
+            return nullptr;
+        }
+
+        // New coroutine context that carries around all information enough to call function
+        context* pc = new context();
+        pc->caller = cur_routine;
+
+        // Store current state right here, i.e just before enter new coroutine, later, once it gets scheduled
+        // execution starts here. Note that we have to acquire stack of the current function call to ensure
+        // that function parameters will be passed along
+        if (setjmp(pc->Environment) > 0) {
+            // Created routine got control in order to start execution. Note that all variables, such as
+            // context pointer, arguments and a pointer to the function comes from restored stack
+            func(std::forward<Ta>(args)...);
+            std::cout << "complete: " << pc << ", next: " << pc->caller << std::endl;
+
+            // Routine complete its execution, time to delete it. Note that we should be extreamly careful in where
+            // to pass control after that. We never want to go backward by stack as that would mean to go backward in
+            // time. Function run has already return once (when setjmp returns 0), so return second return from run
+            // would looks a bit akward
+            context* next = pc->caller;
+            if (pc->prev != nullptr) {
+                pc->prev->next = pc->next;
+            }
+
+            if (pc->next != nullptr) {
+                pc->next->prev = pc->prev;
+            }
+
+            if (pc->caller != nullptr) {
+                pc->caller->callee = nullptr;
+            }
+
+            if (alive == cur_routine) {
+                alive = alive->next;
+            }
+
+            pc->prev = pc->next = nullptr;
+            delete std::get<0>(pc->Stack);
+            delete pc;
+
+            // We cannot return here, as this function "returned" once already, so here we must select some other
+            // coroutine to run. As current coroutine is completed and can't be scheduled anymore, it is safe to
+            // just give up and ask scheduler code to select someone else, control will never returns to this one
+            if (next != nullptr) {
+                sched(next);
+            } else {
+                yield();
+            }
+            return nullptr;
+        }
+
+        // setjmp remembers position from which routine could starts execution, but to make it correctly
+        // it is neccessary to save arguments, pointer to body function, pointer to context, e.t.c - i.e
+        // save stack.
+        Store(*pc);
+
+        // Add routine as alive list
+        pc->next = alive;
+        alive = pc;
+        if (pc->next != nullptr) {
+            pc->next->prev = pc;
+        }
+
+        return pc;
+    }
 };
 
 } // namespace Coroutine
